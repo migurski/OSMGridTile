@@ -7,7 +7,7 @@ from PIL.ImageDraw import ImageDraw
 
 from psycopg2 import connect
 
-from .data import get_landusages_imposm, get_roads_imposm, get_buildings_imposm
+from .data import get_landusages_imposm, get_mainroads_imposm, get_motorways_imposm, get_roads_imposm, get_buildings_imposm
 
 class GridResponse:
 
@@ -74,7 +74,7 @@ class Provider:
                     draw.polygon(list(ring.coords), fill=rgb)
         
         
-        if coord.zoom >= 16:
+        if coord.zoom >= 17:
             for (id, type, shape) in get_buildings_imposm(db, bbox, *transform):
                 rgb = colors.next()
                 objects[rgb] = 'building', name, id
@@ -83,7 +83,13 @@ class Provider:
                     for ring in [geom.exterior] + list(geom.interiors):
                         draw.polygon(list(ring.coords), fill=rgb)
         
-        for (id, type, name, way) in get_roads_imposm(db, bbox, *transform):
+        if coord.zoom >= 15:
+            road_lines = get_roads_imposm(db, bbox, *transform)
+        else:
+            road_lines = get_mainroads_imposm(db, bbox, *transform) \
+                       + get_motorways_imposm(db, bbox, *transform)
+
+        for (id, type, name, way) in road_lines:
             rgb = colors.next()
             objects[rgb] = 'road', type, name, id
             
