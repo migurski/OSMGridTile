@@ -7,7 +7,7 @@ from PIL.ImageDraw import ImageDraw
 
 from psycopg2 import connect
 
-from .data import get_landusages_imposm, get_roads_imposm
+from .data import get_landusages_imposm, get_roads_imposm, get_buildings_imposm
 
 class GridResponse:
 
@@ -40,7 +40,6 @@ class Provider:
         
         _width, _height = width/self.scale, height/self.scale
         
-        db = connect(database='geodata', user='geodata').cursor()
         img = Image.new('RGB', (_width, _height), (0, 0, 0))
         draw = ImageDraw(img)
         
@@ -53,6 +52,7 @@ class Provider:
         
         x_offset, y_offset = -ul.x, -ul.y
         x_scale, y_scale = _width / (lr.x - ul.x), _height / (lr.y - ul.y)
+        transform = x_offset, y_offset, x_scale, y_scale
         
         buf = (lr.x - ul.x) / 2
         bbox = 'ST_SetSRID(ST_Buffer(ST_MakeBox2D(ST_MakePoint(%.3f, %.3f), ST_MakePoint(%.3f, %.3f)), %.3f, 2), 900913)' % (ul.x, ul.y, lr.x, lr.y, buf)
@@ -62,11 +62,10 @@ class Provider:
         # Draw the grid itself and note object color keys as we go.
         #
         
-        polygons = get_landusages_imposm(db, bbox, x_offset, y_offset, x_scale, y_scale)
-        linestrings = get_roads_imposm(db, bbox, x_offset, y_offset, x_scale, y_scale)
         objects = {}
+        db = connect(database='geodata', user='geodata').cursor()
         
-        for (id, type, name, shape) in polygons:
+        for (id, type, name, shape) in get_landusages_imposm(db, bbox, *transform):
             rgb = colors.next()
             objects[rgb] = 'land', type, name, id
             
@@ -75,13 +74,24 @@ class Provider:
                     draw.polygon(list(ring.coords), fill=rgb)
         
         
-        for (id, type, name, way) in linestrings:
+        if coord.zoom >= 16:
+            for (id, type, shape) in get_buildings_imposm(db, bbox, *transform):
+                rgb = colors.next()
+                objects[rgb] = 'building', name, id
+                
+                for geom in getattr(shape, 'geoms', [shape]):
+                    for ring in [geom.exterior] + list(geom.interiors):
+                        draw.polygon(list(ring.coords), fill=rgb)
+        
+        for (id, type, name, way) in get_roads_imposm(db, bbox, *transform):
             rgb = colors.next()
             objects[rgb] = 'road', type, name, id
             
             for geom in getattr(way, 'geoms', [way]):
                 stroke = {18: 4, 17: 3}.get(coord.zoom, 2)
                 draw.line(list(geom.coords), fill=rgb, width=stroke)
+        
+        db.close()
         
         #
         # Collect actual rgb values from image and sort them by frequency
